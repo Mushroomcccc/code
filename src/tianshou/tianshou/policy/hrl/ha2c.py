@@ -12,7 +12,7 @@ from tianshou.utils import RunningMeanStd
 
 
 class HA2CPolicy(BasePolicy):
-    # 分层ac、optim
+    # hierarchical ac、optim
     def __init__(
             self,
             h_actor: torch.nn.Module,
@@ -86,7 +86,7 @@ class HA2CPolicy(BasePolicy):
         """Set the eps for epsilon-greedy exploration."""
         self.eps = eps
 
-    # 分层探索
+    # hiearchical explore
     def forward(
             self,
             batch: Batch,
@@ -98,7 +98,7 @@ class HA2CPolicy(BasePolicy):
             use_batch_in_statetracker=False,
             **kwargs: Any,
     ) -> Batch:
-        # 上层智能体动作
+        # high-level action
         h_obs_emb = self.h_state_tracker(buffer=buffer, indices=indices, is_obs=is_obs, batch=batch, is_train=is_train,
                                          use_batch_in_statetracker=use_batch_in_statetracker)
         h_logits, _ = self.h_actor(h_obs_emb)
@@ -109,7 +109,7 @@ class HA2CPolicy(BasePolicy):
             h_dist = self.h_dist_fn(h_logits)
         h_act = h_dist.sample() # [B, emb_dim]
 
-        # 下层智能体采取动作
+        # low-level action
         is_new_subgoal = (torch.tensor(batch.env_step) % self.subgoal_interval) == 0
         is_new_subgoal = is_new_subgoal.reshape(-1, 1).repeat(1, h_act.shape[1]).to(self.device)
         if isinstance(batch.h_act, np.ndarray) and batch.h_act.shape[0] > 0:
@@ -119,21 +119,21 @@ class HA2CPolicy(BasePolicy):
         l_logits, _ = self.l_actor(torch.cat([l_obs_emb, h_act], dim=-1))
         
 
-        # -------趋向性约束-------
+        # -------Tendency Constraint-------
         l_obs_emb = l_obs_emb[:, :-1]
         b, emb_dim = l_obs_emb.shape
         item_num = self.item_embs.shape[0]
-        # 计算h_act与item_embs之间的欧氏距离
-        l_obs_emb = l_obs_emb.unsqueeze(1).expand(b, item_num, emb_dim)  # 扩展l_obs_emb为[b, item_num, emb_dim]
-        distances = torch.norm(l_obs_emb - self.item_embs, p=2, dim=2)  # 计算欧氏距离，结果形状为[b, item_num]
-        # 获取每个样本中最小的k_near个距离对应的索引
-        _, topk_indices = torch.topk(distances, k=self.k_near, dim=1, largest=False, sorted=False)  # 形状为[b, k_near]
-        # 生成一个掩码矩阵，初始为全零
+        # Obtain the indices corresponding to the k_near smallest distances in each sample, and calculate the Euclidean distance between h_act and item_embs.
+        l_obs_emb = l_obs_emb.unsqueeze(1).expand(b, item_num, emb_dim)  # Expand l_obs_emb to[b, item_num, emb_dim]
+        distances = torch.norm(l_obs_emb - self.item_embs, p=2, dim=2)  
+        # Obtain the indices corresponding to the smallest k_near distances in each sample.
+        _, topk_indices = torch.topk(distances, k=self.k_near, dim=1, largest=False, sorted=False) 
+        # Generate a mask matrix, initially set to all zeros
         mask = torch.zeros_like(distances)
         #print(mask.shape)
-        # 将最小的k_near个距离的位置标记为1
+        # Mark the positions with the smallest k_near distances as 1.
         for i in range(b):
-            mask[i, topk_indices[i]] = 1  # 对于第i个样本，将前k_near个最近的item的位置标记为1
+            mask[i, topk_indices[i]] = 1
 
         if self.action_type == "discrete":
             if is_obs:
@@ -169,7 +169,7 @@ class HA2CPolicy(BasePolicy):
             self, batch: Batch, buffer: ReplayBuffer, indices: np.ndarray
     ) -> Batch:
 
-        # 计算上层智能体信息
+        # Mark the positions with the smallest k_near distances as 1 and calculate the information of the upper-level agent.
         v_s, v_s_ = [], []
         with torch.no_grad():
             for minibatch in batch.split(self._batch_size, shuffle=False, merge_last=True):
@@ -204,13 +204,12 @@ class HA2CPolicy(BasePolicy):
         for _ in range(self.subgoal_interval - 1):
             next_indices_r = self._buffer.next(next_indices_r)
 
-        # 计算下层智能体信息
-        # 计算相似度,添加内部奖励
+        # Calculate the information of the lower-level agents
+        # Calculate the similarity and add internal rewards
         if self.action_type == 'continuous':
             h_act = torch.tensor(batch.h_act).to(self.device)
             l_act = torch.tensor(batch.act).to(self.device)
         else:
-            # 上层traget指引
             indices = batch.indices
             n_indices = buffer.next(indices)
             obs_next_emb = self.l_state_tracker(buffer=buffer, indices=indices, is_obs=False)
@@ -219,7 +218,7 @@ class HA2CPolicy(BasePolicy):
             sim = -(torch.norm(h_act - obs_next_emb, p=2, dim=1) - torch.norm(h_act - obs_emb, p=2, dim=1)).squeeze().detach().cpu().numpy()
             sim = sim * (n_indices != indices)
         batch.rew = (batch.rew + sim * self.lambda_guide) 
-        # 计算target_v,adv
+        # Calculate target_v,adv
         v_s, v_s_ = [], []
         with torch.no_grad():
             for minibatch in batch.split(self._batch_size, shuffle=False, merge_last=True):
@@ -255,7 +254,7 @@ class HA2CPolicy(BasePolicy):
         batch.l_adv = to_torch_as(advantages, batch.l_v_s)
         return batch
 
-    # 分层学习
+    # hiecarchical learing
     def learn(  # type: ignore
             self, batch: Batch, batch_size: int, repeat: int, **kwargs: Any
     ) -> Dict[str, List[float]]:
@@ -264,7 +263,7 @@ class HA2CPolicy(BasePolicy):
         l_optim_RL, l_optim_state = self.l_optim
         for _ in range(repeat):
             for minibatch in batch.split(batch_size, merge_last=True):
-                # 更新上层智能体
+                # update high-level agent
                 # calculate loss for actor
                 h_dist = self(minibatch, self._buffer, indices=minibatch.indices, is_obs=True).h_dist
                 h_log_prob = h_dist.log_prob(minibatch.h_act)
@@ -292,7 +291,7 @@ class HA2CPolicy(BasePolicy):
                 h_optim_RL.step()
                 h_optim_state.step()
 
-                # 更新下层智能体
+                # update low-level agent
                 l_dist = self(minibatch, self._buffer, indices=minibatch.indices, is_obs=True).l_dist
                 l_log_prob = l_dist.log_prob(minibatch.l_act)
                 l_log_prob = l_log_prob.reshape(len(minibatch.l_adv), -1).transpose(0, 1)
