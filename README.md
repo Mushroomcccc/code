@@ -67,8 +67,6 @@ python run/policy/run_DDPG.py --env KuaiEnv-v0 --cuda 3 --which_tracker avg --re
 
 python run/policy/run_TD3.py  --env KuaiEnv-v0  --cuda 3 --which_tracker avg --reward_handle "cat" --window_size 3 --remap 0.001 --explore_eps 1.5 --read_message "pointneg"  --message "TD3" --num_leave_compute 4 
 
-python run/policy/run_SAC4IR.py     --env KuaiEnv-v0   --cuda 5  --which_tracker avg --reward_handle "cat" --window_size 3 --target_entropy_ratio 0.8 --explore_eps 0.1 --read_message "pointneg" --lambda_temper 0.01 --num_leave_compute 4  --message "SAC4IR" 
-
 python run/policy/run_DNaIR.py  --env KuaiEnv-v0  --cuda 5    --which_tracker avg --reward_handle "cat" --window_size 3 --read_message "pointneg" --lambda_novelty  0.01 --num_leave_compute 4  --message "DNaIR" 
 
 python run/policy/run_DORL.py        --env KuaiEnv-v0  --cuda 6 --which_tracker avg --reward_handle "cat" --window_size 3  --read_message "pointneg"  --message "DORL" --lambda_entropy 5 --num_leave_compute 4 
