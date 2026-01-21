@@ -205,7 +205,7 @@ class HA2CPolicy(BasePolicy):
             next_indices_r = self._buffer.next(next_indices_r)
 
         # Calculate the information of the lower-level agents
-        # Calculate the similarity and add internal rewards
+        #  # Calculate the similarity and add internal rewards
         if self.action_type == 'continuous':
             h_act = torch.tensor(batch.h_act).to(self.device)
             l_act = torch.tensor(batch.act).to(self.device)
